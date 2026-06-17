@@ -1,0 +1,11 @@
+httpx
+selectolax
+pydantic
+pydantic-settings
+sqlalchemy
+asyncpg
+alembic
+python-dotenv
+apscheduler
+openai
+python-telegram-bot
