@@ -1,49 +1,55 @@
 import asyncio
 
 from app.db.init_db import init_db
+from app.db.repositories import ArticleRepository
+from app.db.session import AsyncSessionLocal
+from app.services.ai_service import AIService
 
 
-# Точка входа для первой проверки БД.
-# Пока мы просто создаем таблицы и убеждаемся, что подключение работает.
-# async def main() -> None:
-#     await init_db()
-#     print("Tables created successfully.")
-#
-#
-# if __name__ == "__main__":
-#     asyncio.run(main())
+# На этом шаге мы не мониторим сайт,
+# а проверяем первый проход AI-обработки статьи из БД.
+async def main() -> None:
+    await init_db()
 
+    ai_service = AIService()
 
-from app.parsers.f1cosmos import parse_news_list
+    async with AsyncSessionLocal() as session:
+        repository = ArticleRepository(session)
 
+        # Берем первую статью, которая еще не обработана ИИ.
+        article = await repository.get_first_pending_ai_article()
 
-SAMPLE_HTML = """
-<ul>
-  <li>
-    <a
-      title="Lewis Hamilton receives bleak 'F1 limit' warning from former driver"
-      href="/dashboard/news/lewis-hamilton-sent-bleak-f1-limit-warning-2651415556"
-    >
-      <img
-        alt="Lewis Hamilton receives bleak 'F1 limit' warning from former driver"
-        src="https://cdn.racingnews365.com/2026/Hamilton/Hamilton-China-Thurs.jpg"
-      />
-      <h3>Lewis Hamilton receives bleak 'F1 limit' warning from former driver</h3>
-      <time datetime="2026-05-14">33 minutes ago</time>
-      <span class="text-foreground/70">Racingnews365</span>
-      <span>Analysis</span>
-    </a>
-  </li>
-</ul>
-"""
+        if article is None:
+            print("No pending AI articles found.")
+            return
 
+        print("Processing article:")
+        print("id:", article.id)
+        print("slug:", article.slug)
+        print("title:", article.title)
+        print()
 
-def main() -> None:
-    items = parse_news_list(SAMPLE_HTML)
+        try:
+            ai_result = ai_service.process_article(article)
 
-    for item in items:
-        print(item.model_dump())
+            updated_article = await repository.update_ai_result(
+                article=article,
+                title_ru=ai_result["title_ru"],
+                summary_ru=ai_result["summary_ru"],
+                telegram_text=ai_result["telegram_text"],
+            )
+
+            print("AI processing completed successfully.")
+            print("title_ru:", updated_article.title_ru)
+            print("summary_ru:", updated_article.summary_ru)
+            print("telegram_text:", updated_article.telegram_text)
+            print("ai_status:", updated_article.ai_status)
+            print("ai_processed_at:", updated_article.ai_processed_at)
+
+        except Exception as error:
+            await repository.mark_ai_failed(article)
+            print("AI processing failed:", error)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
