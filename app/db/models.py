@@ -79,6 +79,9 @@ class Article(Base):
     # Текст последней ошибки Telegram-отправки.
     telegram_error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Краткая тема статьи для Telegram и фильтрации.
+    topic: Mapped[str | None] = mapped_column(nullable=True)
+
     # Время, когда статья была обработана ИИ.
     ai_processed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
