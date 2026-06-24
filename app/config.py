@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     source_retry_delay_seconds: int = 2
     source_between_requests_seconds: int = 1
 
+    pipeline_run_interval_minutes: int = 5
+
     request_user_agent: str = "Mozilla/5.0"
     media_dir: str = "./storage/media"
 
