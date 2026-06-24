@@ -71,12 +71,13 @@ class Article(Base):
     telegram_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Статус AI-обработки.
-    # Примеры: pending, done, failed
     ai_status: Mapped[str] = mapped_column(nullable=False, default="pending")
 
     # Статус Telegram-публикации.
-    # Примеры: pending, sent, failed
     telegram_status: Mapped[str] = mapped_column(nullable=False, default="pending")
+
+    # Текст последней ошибки Telegram-отправки.
+    telegram_error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Время, когда статья была обработана ИИ.
     ai_processed_at: Mapped[datetime | None] = mapped_column(

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     database_url: str
 
     openai_api_key: str = ""
+    openai_base_url: str = ""
     openai_model: str = "gpt-4.1-mini"
 
     telegram_bot_token: str = ""
@@ -18,6 +19,9 @@ class Settings(BaseSettings):
     source_proxy_url: str = ""
     source_timeout: int = 30
     source_poll_interval_seconds: int = 180
+    source_retry_count: int = 2
+    source_retry_delay_seconds: int = 2
+    source_between_requests_seconds: int = 1
 
     request_user_agent: str = "Mozilla/5.0"
     media_dir: str = "./storage/media"
