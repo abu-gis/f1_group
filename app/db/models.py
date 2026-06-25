@@ -28,6 +28,10 @@ class Article(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
+    # Устойчивый ключ статьи для дедупликации между запусками.
+    content_signature: Mapped[str | None] = mapped_column(nullable=True, index=True)
+
+
     # Уникальный slug новости внутри F1 Cosmos.
     slug: Mapped[str] = mapped_column(nullable=False, unique=True, index=True)
 

@@ -93,12 +93,28 @@ class TelegramService:
                 return
 
             except Exception as error:
+
                 last_error = error
+                error_text = str(error).lower()
+                wait_seconds = retry_delay_seconds
+                if "retry in" in error_text:
+                    import re
+                    match = re.search(r"retry in (\d+)", error_text)
+
+                    if match:
+                        wait_seconds = int(match.group(1)) + 1
 
                 if attempt < retry_count + 1:
-                    await asyncio.sleep(retry_delay_seconds)
+                    await asyncio.sleep(wait_seconds)
 
         if last_error is not None:
             raise last_error
 
         raise RuntimeError("Unknown error while sending Telegram message")
+
+    # Превращает тему в хэштег.
+    # Убираем пробелы и служебные символы.
+    def build_topic_hashtag(self, topic: str) -> str:
+        cleaned = topic.strip().replace(" ", "")
+        cleaned = cleaned.replace("-", "")
+        return f"#{cleaned}"

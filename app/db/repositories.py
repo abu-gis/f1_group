@@ -7,6 +7,7 @@ from app.db.models import Article
 from app.schemas.article import NewsDetail
 
 from sqlalchemy import func, select
+from app.utils.signature import build_article_signature
 
 
 # Репозиторий инкапсулирует работу с таблицей articles.
@@ -33,6 +34,12 @@ class ArticleRepository:
 
     # Сохраняем новую статью в базу.
     async def create_from_detail(self, detail: NewsDetail) -> Article:
+        content_signature = build_article_signature(
+            title=detail.title,
+            source_name=detail.source_name,
+            original_url=detail.original_url,
+        )
+
         article = Article(
             slug=detail.slug,
             f1cosmos_url=detail.f1cosmos_url,
@@ -45,6 +52,7 @@ class ArticleRepository:
             main_image_url=detail.main_image_url,
             published_at_text=detail.published_at_text,
             category=detail.category,
+            content_signature=content_signature,
         )
 
         self.session.add(article)
@@ -198,3 +206,31 @@ class ArticleRepository:
                 return article
 
         return None
+
+    # Ищем статью по content_signature.
+    async def get_by_content_signature(self, content_signature: str) -> Article | None:
+        result = await self.session.execute(
+            select(Article).where(Article.content_signature == content_signature)
+        )
+        return result.scalars().first()
+
+    async def has_sent_article_with_title_ru(self, title_ru: str) -> bool:
+        if not title_ru:
+            return False
+
+        result = await self.session.execute(select(Article))
+        articles = result.scalars().all()
+
+        from app.utils.text import normalize_title
+
+        normalized_title_ru = normalize_title(title_ru)
+
+        for article in articles:
+            if article.telegram_status != "sent":
+                continue
+            if not article.title_ru:
+                continue
+            if normalize_title(article.title_ru) == normalized_title_ru:
+                return True
+
+        return False

@@ -11,6 +11,7 @@ from app.parsers.f1cosmos import (
 from app.services.ai_service import AIService
 from app.services.telegram_service import TelegramService
 from app.utils.text import normalize_title
+from app.utils.signature import build_article_signature
 
 
 # Пайплайн-сервис объединяет все этапы:
@@ -64,6 +65,19 @@ class PipelineService:
             try:
                 detail_html = await self.fetch_detail_with_retry(item.url)
                 detail = parse_news_detail(detail_html, item)
+
+                content_signature = build_article_signature(
+                    title=detail.title,
+                    source_name=detail.source_name,
+                    original_url=detail.original_url,
+                )
+
+                existing_article = await self.repository.get_by_content_signature(
+                    content_signature
+                )
+                if existing_article:
+                    existing_articles_count += 1
+                    continue
 
                 # После detail page проверяем дубль по original_url.
                 if detail.original_url:
@@ -149,15 +163,24 @@ class PipelineService:
 
     # Отправляет готовые статьи в Telegram.
     async def send_telegram_batch(self, limit: int = 10) -> dict[str, int]:
+        from app.utils.text import normalize_title
+
         articles = await self.repository.get_pending_telegram_articles(limit=limit)
 
         sent_count = 0
         failed_count = 0
         skipped_count = 0
+        seen_titles_in_batch: set[str] = set()
 
         for article in articles:
             try:
-                # Если статья с тем же original_url уже была отправлена, пропускаем ее.
+                normalized_title_ru = normalize_title(article.title_ru or article.title)
+
+                if normalized_title_ru in seen_titles_in_batch:
+                    await self.repository.mark_telegram_skipped(article)
+                    skipped_count += 1
+                    continue
+
                 if article.original_url:
                     already_sent = await self.repository.has_sent_article_with_original_url(
                         article.original_url
@@ -167,12 +190,25 @@ class PipelineService:
                         skipped_count += 1
                         continue
 
+                if article.title_ru:
+                    already_sent_by_title = await self.repository.has_sent_article_with_title_ru(
+                        article.title_ru
+                    )
+                    if already_sent_by_title:
+                        await self.repository.mark_telegram_skipped(article)
+                        skipped_count += 1
+                        continue
+
                 await self.telegram_service.send_article_with_retry(article)
                 await self.repository.mark_telegram_sent(article)
 
+                seen_titles_in_batch.add(normalized_title_ru)
                 sent_count += 1
 
+                await asyncio.sleep(3)
+
             except Exception as error:
+                print(f"Telegram send failed for article id={article.id}: {error}")
                 await self.repository.mark_telegram_failed(article, str(error))
                 failed_count += 1
 
