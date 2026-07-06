@@ -12,7 +12,10 @@ from app.services.ai_service import AIService
 from app.services.telegram_service import TelegramService
 from app.utils.text import normalize_title
 from app.utils.signature import build_article_signature
+from app.logger import setup_logger
 
+
+logger = setup_logger()
 
 # Пайплайн-сервис объединяет все этапы:
 # 1. сбор новых новостей
@@ -89,7 +92,9 @@ class PipelineService:
                 await self.repository.create_from_detail(detail)
                 new_articles_count += 1
 
-            except Exception:
+
+            except Exception as error:
+                logger.error("Failed to collect article %s: %s", item.slug, error)
                 failed_articles_count += 1
 
             await asyncio.sleep(settings.source_between_requests_seconds)
@@ -138,7 +143,7 @@ class PipelineService:
                 )
 
                 if existing_article and existing_article.id != article.id:
-                    await self.repository.mark_telegram_skipped(article)
+                    await self.repository.mark_ai_skipped(article)
                     continue
 
                 await self.repository.update_ai_result(
@@ -151,7 +156,8 @@ class PipelineService:
 
                 processed_count += 1
 
-            except Exception:
+            except Exception as error:
+                logger.error("AI processing failed for article id=%s: %s", article.id, error)
                 await self.repository.mark_ai_failed(article)
                 failed_count += 1
 
@@ -208,7 +214,7 @@ class PipelineService:
                 await asyncio.sleep(3)
 
             except Exception as error:
-                print(f"Telegram send failed for article id={article.id}: {error}")
+                logger.error("Telegram send failed for article id=%s: %s", article.id, error)
                 await self.repository.mark_telegram_failed(article, str(error))
                 failed_count += 1
 

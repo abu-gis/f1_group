@@ -45,17 +45,17 @@ class TelegramService:
         safe_title = html.escape(title)
         safe_body = html.escape(body)
 
+        hashtags = ["#f1", "#formula1"]
+
         if topic:
-            safe_topic = html.escape(topic)
-            return (
-                f"{emoji} <b>{safe_title}</b>\n\n"
-                f"{safe_body}\n\n"
-                f"<i>Тема: {safe_topic}</i>"
-            )
+            hashtags.append(self.build_topic_hashtag(topic))
+
+        hashtags_text = " ".join(hashtags)
 
         return (
             f"{emoji} <b>{safe_title}</b>\n\n"
-            f"{safe_body}"
+            f"{safe_body}\n\n"
+            f"{hashtags_text}"
         )
 
     # Отправляет статью в Telegram.
@@ -117,4 +117,5 @@ class TelegramService:
     def build_topic_hashtag(self, topic: str) -> str:
         cleaned = topic.strip().replace(" ", "")
         cleaned = cleaned.replace("-", "")
+        cleaned = cleaned.replace("#", "")
         return f"#{cleaned}"

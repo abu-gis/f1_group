@@ -234,3 +234,15 @@ class ArticleRepository:
                 return True
 
         return False
+
+
+    # Помечаем статью как пропущенную на этапе AI из-за дубля.
+    async def mark_ai_skipped(self, article: Article) -> Article:
+        article.ai_status = "done"
+        article.telegram_status = "skipped"
+        article.telegram_error_text = "Skipped as duplicate after AI normalization"
+        article.ai_processed_at = datetime.now(timezone.utc)
+
+        await self.session.commit()
+        await self.session.refresh(article)
+        return article

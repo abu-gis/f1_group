@@ -1,13 +1,14 @@
 import asyncio
-
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
+from app.bot_admin import build_admin_application
 from app.config import settings
 from app.db.init_db import init_db
 from app.db.repositories import ArticleRepository
 from app.db.session import AsyncSessionLocal
 from app.services.pipeline_service import PipelineService
+from app.logger import setup_logger
 
+logger = setup_logger()
 
 # Флаг нужен, чтобы новый запуск не стартовал,
 # если предыдущий еще не завершился.
@@ -22,7 +23,7 @@ async def run_pipeline_once() -> None:
     global is_pipeline_running
 
     if is_pipeline_running:
-        print("Pipeline is already running. Skipping this scheduled start.")
+        logger.warning("Pipeline is already running. Skipping this scheduled start.")
         return
 
     is_pipeline_running = True
@@ -32,18 +33,17 @@ async def run_pipeline_once() -> None:
             repository = ArticleRepository(session)
             pipeline = PipelineService(repository)
 
-            print("STEP 1: Collecting new articles...")
+            logger.info("STEP 1: Collecting new articles...")
             collect_result = await pipeline.collect_new_articles()
-            print(collect_result)
-            print()
+            logger.info("Collect result: %s", collect_result)
 
-            print("STEP 2: Processing AI queue...")
+            logger.info("STEP 2: Processing AI queue...")
             total_ai_processed = 0
             total_ai_failed = 0
 
             while True:
                 ai_result = await pipeline.process_ai_batch(limit=10)
-                print(ai_result)
+                logger.info("AI batch result: %s", ai_result)
 
                 total_ai_processed += ai_result["processed"]
                 total_ai_failed += ai_result["failed"]
@@ -54,19 +54,18 @@ async def run_pipeline_once() -> None:
                 if ai_result["processed"] == 0 and ai_result["failed"] == 0:
                     break
 
-            print("AI queue finished.")
-            print("Total AI processed:", total_ai_processed)
-            print("Total AI failed:", total_ai_failed)
-            print()
+            logger.info("AI queue finished.")
+            logger.info("Total AI processed: %s", total_ai_processed)
+            logger.info("Total AI failed: %s", total_ai_failed)
 
-            print("STEP 3: Sending Telegram queue...")
+            logger.info("STEP 3: Sending Telegram queue...")
             total_tg_sent = 0
             total_tg_skipped = 0
             total_tg_failed = 0
 
             while True:
                 telegram_result = await pipeline.send_telegram_batch(limit=10)
-                print(telegram_result)
+                logger.info("Telegram batch result: %s", telegram_result)
 
                 total_tg_sent += telegram_result["sent"]
                 total_tg_skipped += telegram_result.get("skipped", 0)
@@ -82,14 +81,15 @@ async def run_pipeline_once() -> None:
                 ):
                     break
 
-            print("Telegram queue finished.")
-            print("Total Telegram sent:", total_tg_sent)
-            print("Total Telegram skipped:", total_tg_skipped)
-            print("Total Telegram failed:", total_tg_failed)
-            print()
+            logger.info("Telegram queue finished.")
+            logger.info("Total Telegram sent: %s", total_tg_sent)
+            logger.info("Total Telegram skipped: %s", total_tg_skipped)
+            logger.info("Total Telegram failed: %s", total_tg_failed)
 
-            print("Pipeline run finished.")
-            print()
+            logger.info("Pipeline run finished.")
+
+    except Exception as error:
+        logger.exception("Pipeline run crashed: %s", error)
 
     finally:
         is_pipeline_running = False
@@ -114,12 +114,19 @@ async def main() -> None:
     )
     scheduler.start()
 
-    print(
-        f"Scheduler started. Pipeline will run every "
-        f"{settings.pipeline_run_interval_minutes} minutes."
+    logger.info(
+        "Scheduler started. Pipeline will run every %s minutes.",
+        settings.pipeline_run_interval_minutes,
     )
 
-    # Держим приложение живым.
+    application = build_admin_application()
+
+    logger.info("Starting admin bot polling...")
+
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+
     while True:
         await asyncio.sleep(3600)
 
