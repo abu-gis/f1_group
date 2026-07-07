@@ -27,6 +27,12 @@ class Settings(BaseSettings):
 
     pipeline_run_interval_minutes: int = 5
 
+    calendar_base_url: str = ""
+    calendar_list_path: str = ""
+    calendar_next_url: str = "/en/dashboard/schedules"
+    calendar_referer_path: str = "/dashboard/schedules?open=1"
+    calendar_router_state_tree: str = ""
+
     request_user_agent: str = "Mozilla/5.0"
     media_dir: str = "./storage/media"
 
