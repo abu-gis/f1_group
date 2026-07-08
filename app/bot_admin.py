@@ -15,7 +15,11 @@ from telegram.ext import (
 
 from app.collectors.calendar import CalendarCollector
 from app.config import settings
-from app.db.repositories import ArticleRepository, SchedulePostRepository
+from app.db.repositories import (
+    ArticleRepository,
+    SchedulePostRepository,
+    SourceSettingRepository,
+)
 from app.db.session import AsyncSessionLocal
 from app.logger import setup_logger
 from app.parsers.calendar import parse_calendar_rsc_payload
@@ -146,6 +150,7 @@ def build_main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("Ошибки", callback_data="errors")],
         [InlineKeyboardButton("Запустить pipeline", callback_data="run_now")],
         [InlineKeyboardButton("Расписание", callback_data="schedule_menu")],
+        [InlineKeyboardButton("Источники", callback_data="sources_menu")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -155,6 +160,22 @@ def build_schedule_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("Показать этапы", callback_data="schedule_list")],
         [InlineKeyboardButton("Назад", callback_data="back_main")],
     ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_sources_menu(sources: list[tuple[str, bool]]) -> InlineKeyboardMarkup:
+    keyboard = []
+
+    for index, (source_name, is_enabled) in enumerate(sources):
+        status = "ВКЛ" if is_enabled else "ВЫКЛ"
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{source_name} — {status}",
+                callback_data=f"source_toggle_{index}",
+            )
+        ])
+
+    keyboard.append([InlineKeyboardButton("Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -512,57 +533,23 @@ async def errors_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.info(
-        "Received /start from chat_id=%s user_id=%s",
-        update.effective_chat.id if update.effective_chat else None,
-        update.effective_user.id if update.effective_user else None,
-    )
-
-    try:
-        if not is_admin(update):
-            logger.warning("Access denied for /start")
-            return
-
-        if update.effective_chat is None:
-            return
-
-        await send_main_menu(update.effective_chat.id, context)
-        logger.info("Replied to /start successfully.")
-
-    except Exception as error:
-        logger.exception("start_command failed: %s", error)
+    if not is_admin(update) or update.effective_chat is None:
+        return
+    await send_main_menu(update.effective_chat.id, context)
 
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.info(
-        "Received /menu from chat_id=%s user_id=%s",
-        update.effective_chat.id if update.effective_chat else None,
-        update.effective_user.id if update.effective_user else None,
-    )
-
-    try:
-        if not is_admin(update):
-            logger.warning("Access denied for /menu")
-            return
-
-        if update.effective_chat is None:
-            return
-
-        await send_main_menu(update.effective_chat.id, context)
-        logger.info("Replied to /menu successfully.")
-
-    except Exception as error:
-        logger.exception("menu_command failed: %s", error)
+    if not is_admin(update) or update.effective_chat is None:
+        return
+    await send_main_menu(update.effective_chat.id, context)
 
 
 async def schedule_edit_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         if not is_admin(update):
             return
-
         if not context.user_data.get("schedule_edit_mode"):
             return
-
         if update.effective_chat is None or update.message is None:
             return
 
@@ -611,15 +598,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await query.answer()
 
-    logger.info(
-        "Received button callback=%s chat_id=%s user_id=%s",
-        query.data,
-        query.message.chat.id if query.message else None,
-        query.from_user.id if query.from_user else None,
-    )
-
     if not is_admin(update):
-        logger.warning("Access denied for callback %s", query.data)
         return
 
     try:
@@ -640,7 +619,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     f"Telegram pending: {len(pending_tg)}\n"
                     f"Telegram failed: {len(failed_tg)}"
                 )
-
                 await query.message.reply_text(message)
             return
 
@@ -651,12 +629,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 return
 
             lines = log_path.read_text(encoding="utf-8").splitlines()
-            tail = lines[-20:] if lines else []
-            message = "\n".join(tail) if tail else "Log file is empty."
-
+            message = "\n".join(lines[-20:]) if lines else "Log file is empty."
             if len(message) > 4000:
                 message = message[-4000:]
-
             await query.message.reply_text(message)
             return
 
@@ -671,12 +646,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 line for line in lines
                 if "ERROR" in line or "failed" in line.lower() or "crashed" in line.lower()
             ]
-            tail = filtered[-20:] if filtered else []
-            message = "\n".join(tail) if tail else "No recent errors found."
-
+            message = "\n".join(filtered[-20:]) if filtered else "No recent errors found."
             if len(message) > 4000:
                 message = message[-4000:]
-
             await query.message.reply_text(message)
             return
 
@@ -693,11 +665,50 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return
 
+        if query.data == "sources_menu":
+            async with AsyncSessionLocal() as session:
+                repository = SourceSettingRepository(session)
+                sources = await repository.list_sources_with_status()
+
+            if not sources:
+                await query.message.reply_text("Источники пока не найдены.")
+                return
+
+            context.application.bot_data["source_settings_list"] = sources
+
+            await query.message.reply_text(
+                "Управление источниками:",
+                reply_markup=build_sources_menu(sources),
+            )
+            return
+
+        if query.data.startswith("source_toggle_"):
+            index = int(query.data.replace("source_toggle_", ""))
+            sources = context.application.bot_data.get("source_settings_list", [])
+
+            if index >= len(sources):
+                await query.message.reply_text("Источник не найден.")
+                return
+
+            source_name, _ = sources[index]
+
+            async with AsyncSessionLocal() as session:
+                repository = SourceSettingRepository(session)
+                await repository.toggle_source(source_name)
+                updated_sources = await repository.list_sources_with_status()
+
+            context.application.bot_data["source_settings_list"] = updated_sources
+
+            await query.message.reply_text(
+                f"Источник обновлён: {source_name}",
+                reply_markup=build_sources_menu(updated_sources),
+            )
+            return
+
         if query.data == "schedule_list":
             collector = CalendarCollector()
             payload = await collector.fetch_calendar_rsc()
             rounds = parse_calendar_rsc_payload(payload)
-            logger.info("Parsed calendar rounds: %s", len(rounds))
 
             if not rounds:
                 await query.message.reply_text(

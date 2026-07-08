@@ -2,7 +2,8 @@ import asyncio
 
 from app.collectors.f1cosmos import F1CosmosCollector
 from app.config import settings
-from app.db.repositories import ArticleRepository
+from app.db.repositories import ArticleRepository, SourceSettingRepository
+from app.logger import setup_logger
 from app.parsers.f1cosmos import (
     deduplicate_news_list,
     parse_news_detail,
@@ -10,17 +11,12 @@ from app.parsers.f1cosmos import (
 )
 from app.services.ai_service import AIService
 from app.services.telegram_service import TelegramService
-from app.utils.text import normalize_title
 from app.utils.signature import build_article_signature
-from app.logger import setup_logger
-
+from app.utils.text import normalize_title
 
 logger = setup_logger()
 
-# Пайплайн-сервис объединяет все этапы:
-# 1. сбор новых новостей
-# 2. AI-обработка
-# 3. отправка в Telegram
+
 class PipelineService:
     def __init__(self, repository: ArticleRepository) -> None:
         self.repository = repository
@@ -28,38 +24,30 @@ class PipelineService:
         self.ai_service = AIService()
         self.telegram_service = TelegramService()
 
-    # Скачивает список новостей, убирает дубли и сохраняет только новые статьи.
     async def collect_new_articles(self) -> dict[str, int]:
         list_html = await self.collector.fetch_news_list_html()
         parsed_items = parse_news_list(list_html)
         items = deduplicate_news_list(parsed_items)
 
-        from app.utils.text import normalize_title
-
         new_articles_count = 0
         existing_articles_count = 0
         failed_articles_count = 0
-
-        # Храним нормализованные title, уже встреченные в текущем запуске.
         seen_titles_in_run: set[str] = set()
 
         for item in items:
             normalized_title = normalize_title(item.title)
 
-            # Если такой заголовок уже встречался в этой же ленте, сразу пропускаем.
             if normalized_title in seen_titles_in_run:
                 existing_articles_count += 1
                 continue
 
             seen_titles_in_run.add(normalized_title)
 
-            # Проверяем дубль по slug.
             existing_article = await self.repository.get_by_slug(item.slug)
             if existing_article:
                 existing_articles_count += 1
                 continue
 
-            # Проверяем дубль по нормализованному title в БД.
             existing_article = await self.repository.get_by_normalized_title(normalized_title)
             if existing_article:
                 existing_articles_count += 1
@@ -75,14 +63,11 @@ class PipelineService:
                     original_url=detail.original_url,
                 )
 
-                existing_article = await self.repository.get_by_content_signature(
-                    content_signature
-                )
+                existing_article = await self.repository.get_by_content_signature(content_signature)
                 if existing_article:
                     existing_articles_count += 1
                     continue
 
-                # После detail page проверяем дубль по original_url.
                 if detail.original_url:
                     existing_article = await self.repository.get_by_original_url(detail.original_url)
                     if existing_article:
@@ -91,7 +76,6 @@ class PipelineService:
 
                 await self.repository.create_from_detail(detail)
                 new_articles_count += 1
-
 
             except Exception as error:
                 logger.error("Failed to collect article %s: %s", item.slug, error)
@@ -107,7 +91,6 @@ class PipelineService:
             "failed": failed_articles_count,
         }
 
-    # Пытается скачать detail page с несколькими попытками.
     async def fetch_detail_with_retry(self, url: str) -> str:
         last_error: Exception | None = None
 
@@ -126,7 +109,6 @@ class PipelineService:
 
         raise RuntimeError("Unknown error while fetching detail page")
 
-    # Обрабатывает пачку статей через AI.
     async def process_ai_batch(self, limit: int = 10) -> dict[str, int]:
         articles = await self.repository.get_pending_ai_articles(limit=limit)
 
@@ -167,11 +149,9 @@ class PipelineService:
             "failed": failed_count,
         }
 
-    # Отправляет готовые статьи в Telegram.
     async def send_telegram_batch(self, limit: int = 10) -> dict[str, int]:
-        from app.utils.text import normalize_title
-
         articles = await self.repository.get_pending_telegram_articles(limit=limit)
+        source_repository = SourceSettingRepository(self.repository.session)
 
         sent_count = 0
         failed_count = 0
@@ -180,6 +160,15 @@ class PipelineService:
 
         for article in articles:
             try:
+                source_enabled = await source_repository.is_source_enabled(article.source_name)
+                if not source_enabled:
+                    await self.repository.mark_telegram_skipped(
+                        article,
+                        reason=f"Skipped: source disabled ({article.source_name})",
+                    )
+                    skipped_count += 1
+                    continue
+
                 normalized_title_ru = normalize_title(article.title_ru or article.title)
 
                 if normalized_title_ru in seen_titles_in_batch:

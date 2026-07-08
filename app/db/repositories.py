@@ -1,28 +1,23 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Article, SchedulePost
+from app.db.models import Article, SchedulePost, SourceSetting
 from app.schemas.article import NewsDetail
-
-from sqlalchemy import func, select
 from app.utils.signature import build_article_signature
 
 
-# Репозиторий инкапсулирует работу с таблицей articles.
-# Здесь хранится логика поиска, вставки и обновления статей.
 class ArticleRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # Ищем статью по slug.
     async def get_by_slug(self, slug: str) -> Article | None:
         result = await self.session.execute(
             select(Article).where(Article.slug == slug)
         )
         return result.scalar_one_or_none()
 
-    # Берем первую статью, которая еще не обработана ИИ.
     async def get_first_pending_ai_article(self) -> Article | None:
         result = await self.session.execute(
             select(Article)
@@ -31,7 +26,6 @@ class ArticleRepository:
         )
         return result.scalars().first()
 
-    # Сохраняем новую статью в базу.
     async def create_from_detail(self, detail: NewsDetail) -> Article:
         content_signature = build_article_signature(
             title=detail.title,
@@ -59,14 +53,13 @@ class ArticleRepository:
         await self.session.refresh(article)
         return article
 
-    # Обновляем статью результатами AI-обработки.
     async def update_ai_result(
-            self,
-            article: Article,
-            title_ru: str,
-            summary_ru: str,
-            telegram_text: str,
-            topic: str | None,
+        self,
+        article: Article,
+        title_ru: str,
+        summary_ru: str,
+        telegram_text: str,
+        topic: str | None,
     ) -> Article:
         article.title_ru = title_ru
         article.summary_ru = summary_ru
@@ -79,7 +72,6 @@ class ArticleRepository:
         await self.session.refresh(article)
         return article
 
-    # Если AI-обработка не удалась, отмечаем статью как failed.
     async def mark_ai_failed(self, article: Article) -> Article:
         article.ai_status = "failed"
 
@@ -87,8 +79,6 @@ class ArticleRepository:
         await self.session.refresh(article)
         return article
 
-    # Берем несколько статей, которые еще не обработаны ИИ.
-    # limit нужен, чтобы можно было обрабатывать статьи пачками.
     async def get_pending_ai_articles(self, limit: int = 10) -> list[Article]:
         result = await self.session.execute(
             select(Article)
@@ -98,7 +88,6 @@ class ArticleRepository:
         )
         return list(result.scalars().all())
 
-    # Берем несколько статей, готовых к публикации в Telegram.
     async def get_pending_telegram_articles(self, limit: int = 10) -> list[Article]:
         result = await self.session.execute(
             select(Article)
@@ -109,7 +98,6 @@ class ArticleRepository:
         )
         return list(result.scalars().all())
 
-    # Берем несколько статей, у которых Telegram-отправка ранее упала.
     async def get_failed_telegram_articles(self, limit: int = 10) -> list[Article]:
         result = await self.session.execute(
             select(Article)
@@ -120,7 +108,6 @@ class ArticleRepository:
         )
         return list(result.scalars().all())
 
-    # Отмечаем статью как успешно отправленную в Telegram.
     async def mark_telegram_sent(self, article: Article) -> Article:
         article.telegram_status = "sent"
         article.telegram_sent_at = datetime.now(timezone.utc)
@@ -130,7 +117,6 @@ class ArticleRepository:
         await self.session.refresh(article)
         return article
 
-    # Если публикация не удалась, сохраняем текст ошибки.
     async def mark_telegram_failed(self, article: Article, error_text: str) -> Article:
         article.telegram_status = "failed"
         article.telegram_error_text = error_text
@@ -139,22 +125,18 @@ class ArticleRepository:
         await self.session.refresh(article)
         return article
 
-    # Ищем статью по точному заголовку.
     async def get_by_title(self, title: str) -> Article | None:
         result = await self.session.execute(
             select(Article).where(Article.title == title)
         )
         return result.scalars().first()
 
-    # Ищем статью по original_url.
     async def get_by_original_url(self, original_url: str) -> Article | None:
         result = await self.session.execute(
             select(Article).where(Article.original_url == original_url)
         )
         return result.scalars().first()
 
-
-    # Ищем статью по нормализованному заголовку без учета регистра и лишней пунктуации.
     async def get_by_normalized_title(self, normalized_title: str) -> Article | None:
         result = await self.session.execute(select(Article))
         articles = result.scalars().all()
@@ -167,8 +149,6 @@ class ArticleRepository:
 
         return None
 
-
-    # Проверяем, была ли уже отправлена статья с тем же original_url.
     async def has_sent_article_with_original_url(self, original_url: str) -> bool:
         if not original_url:
             return False
@@ -181,15 +161,17 @@ class ArticleRepository:
         )
         return result.scalars().first() is not None
 
-    # Помечаем статью как пропущенную из-за дубля.
-    async def mark_telegram_skipped(self, article: Article) -> Article:
+    async def mark_telegram_skipped(
+        self,
+        article: Article,
+        reason: str = "Skipped as duplicate",
+    ) -> Article:
         article.telegram_status = "skipped"
-        article.telegram_error_text = "Skipped as duplicate"
+        article.telegram_error_text = reason
 
         await self.session.commit()
         await self.session.refresh(article)
         return article
-
 
     async def get_by_normalized_title_ru(self, normalized_title_ru: str) -> Article | None:
         result = await self.session.execute(select(Article))
@@ -206,7 +188,6 @@ class ArticleRepository:
 
         return None
 
-    # Ищем статью по content_signature.
     async def get_by_content_signature(self, content_signature: str) -> Article | None:
         result = await self.session.execute(
             select(Article).where(Article.content_signature == content_signature)
@@ -234,8 +215,6 @@ class ArticleRepository:
 
         return False
 
-
-    # Помечаем статью как пропущенную на этапе AI из-за дубля.
     async def mark_ai_skipped(self, article: Article) -> Article:
         article.ai_status = "done"
         article.telegram_status = "skipped"
@@ -328,3 +307,71 @@ class SchedulePostRepository:
         await self.session.commit()
         await self.session.refresh(schedule_post)
         return schedule_post
+
+
+class SourceSettingRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_source_name(self, source_name: str) -> SourceSetting | None:
+        result = await self.session.execute(
+            select(SourceSetting).where(SourceSetting.source_name == source_name)
+        )
+        return result.scalar_one_or_none()
+
+    async def is_source_enabled(self, source_name: str | None) -> bool:
+        if not source_name:
+            return True
+
+        setting = await self.get_by_source_name(source_name)
+        if setting is None:
+            return True
+
+        return setting.is_enabled
+
+    async def set_source_enabled(self, source_name: str, is_enabled: bool) -> SourceSetting:
+        setting = await self.get_by_source_name(source_name)
+
+        if setting is None:
+            setting = SourceSetting(
+                source_name=source_name,
+                is_enabled=is_enabled,
+            )
+            self.session.add(setting)
+        else:
+            setting.is_enabled = is_enabled
+
+        await self.session.commit()
+        await self.session.refresh(setting)
+        return setting
+
+    async def toggle_source(self, source_name: str) -> SourceSetting:
+        current_enabled = await self.is_source_enabled(source_name)
+        return await self.set_source_enabled(source_name, not current_enabled)
+
+    async def list_sources_with_status(self) -> list[tuple[str, bool]]:
+        article_result = await self.session.execute(
+            select(Article.source_name)
+            .where(Article.source_name.is_not(None))
+            .distinct()
+            .order_by(Article.source_name.asc())
+        )
+        article_sources = [
+            row[0].strip()
+            for row in article_result.all()
+            if row[0] and row[0].strip()
+        ]
+
+        settings_result = await self.session.execute(
+            select(SourceSetting).order_by(SourceSetting.source_name.asc())
+        )
+        settings = list(settings_result.scalars().all())
+
+        settings_map = {item.source_name: item.is_enabled for item in settings}
+        all_sources = sorted(set(article_sources) | set(settings_map.keys()))
+
+        result: list[tuple[str, bool]] = []
+        for source_name in all_sources:
+            result.append((source_name, settings_map.get(source_name, True)))
+
+        return result
