@@ -1,3 +1,5 @@
+import html
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,7 +15,7 @@ from telegram.ext import (
 
 from app.collectors.calendar import CalendarCollector
 from app.config import settings
-from app.db.repositories import ArticleRepository
+from app.db.repositories import ArticleRepository, SchedulePostRepository
 from app.db.session import AsyncSessionLocal
 from app.logger import setup_logger
 from app.parsers.calendar import parse_calendar_rsc_payload
@@ -22,7 +24,6 @@ from app.schemas.calendar import CalendarRoundItem
 
 logger = setup_logger()
 MSK_TZ = timezone(timedelta(hours=3))
-MSK_OFFSET_HOURS = 3
 
 MONTHS_RU = {
     1: "января",
@@ -139,20 +140,12 @@ def is_admin(update: Update) -> bool:
 
 def build_main_menu() -> InlineKeyboardMarkup:
     keyboard = [
-        [
-            InlineKeyboardButton("Статус", callback_data="status"),
-            InlineKeyboardButton("Очереди", callback_data="queue"),
-        ],
-        [
-            InlineKeyboardButton("Логи", callback_data="logs"),
-            InlineKeyboardButton("Ошибки", callback_data="errors"),
-        ],
-        [
-            InlineKeyboardButton("Запустить pipeline", callback_data="run_now"),
-        ],
-        [
-            InlineKeyboardButton("Расписание", callback_data="schedule_menu"),
-        ],
+        [InlineKeyboardButton("Статус", callback_data="status")],
+        [InlineKeyboardButton("Очереди", callback_data="queue")],
+        [InlineKeyboardButton("Логи", callback_data="logs")],
+        [InlineKeyboardButton("Ошибки", callback_data="errors")],
+        [InlineKeyboardButton("Запустить pipeline", callback_data="run_now")],
+        [InlineKeyboardButton("Расписание", callback_data="schedule_menu")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -165,11 +158,22 @@ def build_schedule_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def build_schedule_preview_menu(index: int) -> InlineKeyboardMarkup:
+def build_schedule_preview_menu(schedule_post_id: int) -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("Опубликовать", callback_data=f"schedule_publish_{index}")],
-        [InlineKeyboardButton("Редактировать", callback_data=f"schedule_edit_{index}")],
-        [InlineKeyboardButton("Назад к этапам", callback_data="schedule_list")],
+        [
+            InlineKeyboardButton("Показать трассу", callback_data=f"schedule_track_{schedule_post_id}"),
+            InlineKeyboardButton("Опубликовать трассу", callback_data=f"schedule_publish_track_{schedule_post_id}"),
+        ],
+        [
+            InlineKeyboardButton("Опубликовать исходный", callback_data=f"schedule_publish_original_{schedule_post_id}"),
+            InlineKeyboardButton("Опубликовать отредактированный", callback_data=f"schedule_publish_edited_{schedule_post_id}"),
+        ],
+        [
+            InlineKeyboardButton("Редактировать", callback_data=f"schedule_edit_{schedule_post_id}"),
+        ],
+        [
+            InlineKeyboardButton("Назад к этапам", callback_data="schedule_list"),
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -185,12 +189,11 @@ async def send_main_menu(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> No
 def translate_session_name(name: str) -> str:
     return SESSION_NAMES_RU.get(name, name)
 
+
 def build_session_emoji(session_name: str) -> str:
     normalized = session_name.lower().strip()
-
     if "race" in normalized or normalized == "sprint":
         return "🏆"
-
     return "🏁"
 
 
@@ -216,6 +219,16 @@ def build_country_flag(round_item: CalendarRoundItem) -> str:
     return COUNTRY_FLAGS.get(key, "🏁")
 
 
+def build_round_key(round_item: CalendarRoundItem) -> str:
+    return "|".join(
+        [
+            round_item.round_number.strip(),
+            round_item.short_title.strip(),
+            round_item.start_date.strip(),
+        ]
+    )
+
+
 def format_datetime_msk(date_text: str) -> datetime:
     parsed = datetime.fromisoformat(date_text.replace("Z", "+00:00"))
     return parsed.astimezone(MSK_TZ)
@@ -225,17 +238,27 @@ def format_date_label_ru(date_text: str) -> str:
     parsed = format_datetime_msk(date_text)
     return f"{parsed.day} {MONTHS_RU[parsed.month]}, {WEEKDAYS_RU[parsed.weekday()]}"
 
+
 def format_time_ru(date_text: str) -> str:
     parsed = format_datetime_msk(date_text)
     return parsed.strftime("%H:%M")
 
+
+def format_track_value(value: str) -> str:
+    return value.replace("km", " km")
+
+
 def build_schedule_post_text(round_item: CalendarRoundItem) -> str:
     flag = build_country_flag(round_item)
     hashtag = build_country_hashtag(round_item)
-    title = f"{flag} {round_item.short_title} {datetime.now().year}"
-    circuit = round_item.circuit_name
+    title = html.escape(f"{flag} {round_item.short_title} {datetime.now().year}")
+    circuit = html.escape(round_item.circuit_name)
 
-    lines = [f"{title} ({circuit})", ""]
+    lines = [
+        f"<b>{title}</b>",
+        f"<b>{circuit}</b>",
+        "",
+    ]
 
     current_date = None
     for session in round_item.sessions:
@@ -246,7 +269,7 @@ def build_schedule_post_text(round_item: CalendarRoundItem) -> str:
             current_date = date_label
             lines.append(date_label)
 
-        session_name = translate_session_name(session.name)
+        session_name = html.escape(translate_session_name(session.name))
         session_time = format_time_ru(session.start_date)
         session_emoji = build_session_emoji(session.name)
         lines.append(f"{session_emoji} {session_name} — {session_time} МСК")
@@ -255,6 +278,60 @@ def build_schedule_post_text(round_item: CalendarRoundItem) -> str:
     lines.append(f"#f1 #formula1 {hashtag}")
 
     return "\n".join(lines)
+
+
+def translate_track_label(label: str) -> str:
+    mapping = {
+        "Circuit Length": "Длина трассы",
+        "First Grand Prix": "Первый Гран-при",
+        "Number of Laps": "Количество кругов",
+        "Lap Record": "Рекорд круга",
+        "Fastest lap time": "Рекорд круга",
+        "Race Distance": "Дистанция гонки",
+    }
+    return mapping.get(label, label)
+
+
+def build_track_info_text(round_item: CalendarRoundItem) -> str:
+    flag = build_country_flag(round_item)
+    circuit_name = html.escape(round_item.circuit_name)
+
+    lines = [
+        f"<b>{flag} Трасса: {circuit_name}</b>",
+        "",
+    ]
+
+    for item in round_item.circuit.info:
+        label = html.escape(translate_track_label(item.key))
+        value = format_track_value(item.value.strip())
+
+        if item.annotation:
+            value = f"{value} — {item.annotation.strip()}"
+
+        value = html.escape(value)
+        lines.append(f"{label}: {value}")
+
+    return "\n".join(lines)
+
+
+def extract_map_url_from_schedule_post(schedule_post) -> str | None:
+    if not schedule_post.source_payload_json:
+        return None
+
+    try:
+        payload = json.loads(schedule_post.source_payload_json)
+    except json.JSONDecodeError:
+        return None
+
+    circuit = payload.get("circuit")
+    if not isinstance(circuit, dict):
+        return None
+
+    map_url = circuit.get("map_url")
+    if isinstance(map_url, str) and map_url.strip():
+        return map_url.strip()
+
+    return None
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -276,7 +353,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             chat_id=update.effective_chat.id,
             text="Bot is running. Admin panel is active.",
         )
-
         logger.info("Replied to /status successfully.")
 
     except Exception as error:
@@ -300,7 +376,6 @@ async def queue_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         async with AsyncSessionLocal() as session:
             repository = ArticleRepository(session)
-
             pending_ai = await repository.get_pending_ai_articles(limit=100)
             pending_tg = await repository.get_pending_telegram_articles(limit=100)
             failed_tg = await repository.get_failed_telegram_articles(limit=100)
@@ -316,7 +391,6 @@ async def queue_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 chat_id=update.effective_chat.id,
                 text=message,
             )
-
         logger.info("Replied to /queue successfully.")
 
     except Exception as error:
@@ -342,14 +416,11 @@ async def run_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             chat_id=update.effective_chat.id,
             text="Manual pipeline run started.",
         )
-
         await run_pipeline_once()
-
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Manual pipeline run finished.",
         )
-
         logger.info("Replied to /run_now successfully.")
 
     except Exception as error:
@@ -390,7 +461,6 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             chat_id=update.effective_chat.id,
             text=message,
         )
-
         logger.info("Replied to /logs successfully.")
 
     except Exception as error:
@@ -435,7 +505,6 @@ async def errors_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             chat_id=update.effective_chat.id,
             text=message,
         )
-
         logger.info("Replied to /errors successfully.")
 
     except Exception as error:
@@ -498,15 +567,37 @@ async def schedule_edit_text_handler(update: Update, context: ContextTypes.DEFAU
             return
 
         edited_text = update.message.text.strip()
-        draft_index = context.user_data.get("schedule_draft_index", 0)
+        schedule_post_id = context.user_data.get("schedule_post_id")
 
-        context.user_data["schedule_draft_text"] = edited_text
+        if not schedule_post_id:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Не найдена запись расписания для редактирования.",
+            )
+            context.user_data["schedule_edit_mode"] = False
+            return
+
+        async with AsyncSessionLocal() as session:
+            repository = SchedulePostRepository(session)
+            schedule_post = await repository.get_by_id(schedule_post_id)
+
+            if schedule_post is None:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Запись расписания не найдена в базе.",
+                )
+                context.user_data["schedule_edit_mode"] = False
+                return
+
+            await repository.save_edited_text(schedule_post, edited_text)
+
         context.user_data["schedule_edit_mode"] = False
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Черновик обновлён:\n\n" + edited_text,
-            reply_markup=build_schedule_preview_menu(draft_index),
+            reply_markup=build_schedule_preview_menu(schedule_post_id),
+            parse_mode="HTML",
         )
 
     except Exception as error:
@@ -515,7 +606,6 @@ async def schedule_edit_text_handler(update: Update, context: ContextTypes.DEFAU
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-
     if query is None:
         return
 
@@ -540,7 +630,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if query.data == "queue":
             async with AsyncSessionLocal() as session:
                 repository = ArticleRepository(session)
-
                 pending_ai = await repository.get_pending_ai_articles(limit=100)
                 pending_tg = await repository.get_pending_telegram_articles(limit=100)
                 failed_tg = await repository.get_failed_telegram_articles(limit=100)
@@ -646,40 +735,144 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
             selected_round = rounds[index]
             draft_text = build_schedule_post_text(selected_round)
+            track_text = build_track_info_text(selected_round)
+            round_key = build_round_key(selected_round)
 
-            context.user_data["schedule_draft_index"] = index
-            context.user_data["schedule_draft_text"] = draft_text
+            async with AsyncSessionLocal() as session:
+                repository = SchedulePostRepository(session)
+                schedule_post = await repository.create_or_update(
+                    round_key=round_key,
+                    round_number=selected_round.round_number,
+                    grand_prix_title=selected_round.short_title,
+                    country=selected_round.country,
+                    city=selected_round.city,
+                    circuit_name=selected_round.circuit_name,
+                    start_date=selected_round.start_date,
+                    end_date=selected_round.end_date,
+                    original_text=draft_text,
+                    track_text=track_text,
+                    source_payload_json=json.dumps(selected_round.model_dump(), ensure_ascii=False),
+                )
+
+            context.user_data["schedule_post_id"] = schedule_post.id
             context.user_data["schedule_edit_mode"] = False
 
             await query.message.reply_text(
-                draft_text,
-                reply_markup=build_schedule_preview_menu(index),
+                schedule_post.original_text,
+                reply_markup=build_schedule_preview_menu(schedule_post.id),
+                parse_mode="HTML",
             )
             return
 
+        if query.data.startswith("schedule_track_"):
+            schedule_post_id = int(query.data.replace("schedule_track_", ""))
+
+            async with AsyncSessionLocal() as session:
+                repository = SchedulePostRepository(session)
+                schedule_post = await repository.get_by_id(schedule_post_id)
+
+                if schedule_post is None:
+                    await query.message.reply_text("Информация о трассе не найдена.")
+                    return
+
+                map_url = extract_map_url_from_schedule_post(schedule_post)
+
+                if map_url:
+                    await context.bot.send_photo(
+                        chat_id=query.message.chat.id,
+                        photo=map_url,
+                        caption=schedule_post.track_text,
+                        parse_mode="HTML",
+                    )
+                else:
+                    await query.message.reply_text(
+                        schedule_post.track_text,
+                        parse_mode="HTML",
+                    )
+            return
+
+        if query.data.startswith("schedule_publish_track_"):
+            schedule_post_id = int(query.data.replace("schedule_publish_track_", ""))
+
+            async with AsyncSessionLocal() as session:
+                repository = SchedulePostRepository(session)
+                schedule_post = await repository.get_by_id(schedule_post_id)
+
+                if schedule_post is None:
+                    await query.message.reply_text("Информация о трассе не найдена.")
+                    return
+
+                map_url = extract_map_url_from_schedule_post(schedule_post)
+
+                if map_url:
+                    await context.bot.send_photo(
+                        chat_id=settings.telegram_chat_id,
+                        photo=map_url,
+                        caption=schedule_post.track_text,
+                        parse_mode="HTML",
+                    )
+                else:
+                    await context.bot.send_message(
+                        chat_id=settings.telegram_chat_id,
+                        text=schedule_post.track_text,
+                        parse_mode="HTML",
+                    )
+
+            await query.message.reply_text("Информация о трассе опубликована.")
+            return
+
         if query.data.startswith("schedule_edit_"):
-            index = int(query.data.replace("schedule_edit_", ""))
-            context.user_data["schedule_draft_index"] = index
+            schedule_post_id = int(query.data.replace("schedule_edit_", ""))
+            context.user_data["schedule_post_id"] = schedule_post_id
             context.user_data["schedule_edit_mode"] = True
 
             await query.message.reply_text("Пришлите новый текст поста одним сообщением.")
             return
 
-        if query.data.startswith("schedule_publish_"):
-            draft_text = context.user_data.get("schedule_draft_text", "").strip()
+        if query.data.startswith("schedule_publish_original_"):
+            schedule_post_id = int(query.data.replace("schedule_publish_original_", ""))
 
-            if not draft_text:
-                await query.message.reply_text("Черновик не найден.")
-                return
+            async with AsyncSessionLocal() as session:
+                repository = SchedulePostRepository(session)
+                schedule_post = await repository.get_by_id(schedule_post_id)
 
-            await context.bot.send_message(
-                chat_id=settings.telegram_chat_id,
-                text=draft_text,
-            )
+                if schedule_post is None:
+                    await query.message.reply_text("Исходный текст не найден.")
+                    return
 
-            context.user_data["schedule_edit_mode"] = False
+                await context.bot.send_message(
+                    chat_id=settings.telegram_chat_id,
+                    text=schedule_post.original_text,
+                    parse_mode="HTML",
+                )
+                await repository.mark_original_sent(schedule_post)
 
-            await query.message.reply_text("Расписание опубликовано.")
+            await query.message.reply_text("Исходное расписание опубликовано.")
+            return
+
+        if query.data.startswith("schedule_publish_edited_"):
+            schedule_post_id = int(query.data.replace("schedule_publish_edited_", ""))
+
+            async with AsyncSessionLocal() as session:
+                repository = SchedulePostRepository(session)
+                schedule_post = await repository.get_by_id(schedule_post_id)
+
+                if schedule_post is None:
+                    await query.message.reply_text("Отредактированный текст не найден.")
+                    return
+
+                if not schedule_post.edited_text:
+                    await query.message.reply_text("Отредактированный текст пока не сохранён.")
+                    return
+
+                await context.bot.send_message(
+                    chat_id=settings.telegram_chat_id,
+                    text=schedule_post.edited_text,
+                    parse_mode="HTML",
+                )
+                await repository.mark_edited_sent(schedule_post)
+
+            await query.message.reply_text("Отредактированное расписание опубликовано.")
             return
 
         if query.data == "back_main":

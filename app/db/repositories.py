@@ -1,9 +1,8 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Article
+from app.db.models import Article, SchedulePost
 from app.schemas.article import NewsDetail
 
 from sqlalchemy import func, select
@@ -246,3 +245,86 @@ class ArticleRepository:
         await self.session.commit()
         await self.session.refresh(article)
         return article
+
+
+class SchedulePostRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_id(self, schedule_post_id: int) -> SchedulePost | None:
+        result = await self.session.execute(
+            select(SchedulePost).where(SchedulePost.id == schedule_post_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_round_key(self, round_key: str) -> SchedulePost | None:
+        result = await self.session.execute(
+            select(SchedulePost).where(SchedulePost.round_key == round_key)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_or_update(
+        self,
+        *,
+        round_key: str,
+        round_number: str,
+        grand_prix_title: str,
+        country: str,
+        city: str,
+        circuit_name: str,
+        start_date: str,
+        end_date: str,
+        original_text: str,
+        track_text: str,
+        source_payload_json: str | None,
+    ) -> SchedulePost:
+        schedule_post = await self.get_by_round_key(round_key)
+
+        if schedule_post is None:
+            schedule_post = SchedulePost(
+                round_key=round_key,
+                round_number=round_number,
+                grand_prix_title=grand_prix_title,
+                country=country,
+                city=city,
+                circuit_name=circuit_name,
+                start_date=start_date,
+                end_date=end_date,
+                original_text=original_text,
+                track_text=track_text,
+                source_payload_json=source_payload_json,
+            )
+            self.session.add(schedule_post)
+        else:
+            schedule_post.round_number = round_number
+            schedule_post.grand_prix_title = grand_prix_title
+            schedule_post.country = country
+            schedule_post.city = city
+            schedule_post.circuit_name = circuit_name
+            schedule_post.start_date = start_date
+            schedule_post.end_date = end_date
+            schedule_post.original_text = original_text
+            schedule_post.track_text = track_text
+            schedule_post.source_payload_json = source_payload_json
+
+        await self.session.commit()
+        await self.session.refresh(schedule_post)
+        return schedule_post
+
+    async def save_edited_text(self, schedule_post: SchedulePost, edited_text: str) -> SchedulePost:
+        schedule_post.edited_text = edited_text
+        await self.session.commit()
+        await self.session.refresh(schedule_post)
+        return schedule_post
+
+    async def mark_original_sent(self, schedule_post: SchedulePost) -> SchedulePost:
+        schedule_post.original_sent_at = datetime.now(timezone.utc)
+        await self.session.commit()
+        await self.session.refresh(schedule_post)
+        return schedule_post
+
+    async def mark_edited_sent(self, schedule_post: SchedulePost) -> SchedulePost:
+        schedule_post.edited_sent_at = datetime.now(timezone.utc)
+        await self.session.commit()
+        await self.session.refresh(schedule_post)
+        return schedule_post
