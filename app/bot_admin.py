@@ -533,12 +533,24 @@ async def errors_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(
+        "Received /start from chat_id=%s user_id=%s",
+        update.effective_chat.id if update.effective_chat else None,
+        update.effective_user.id if update.effective_user else None,
+    )
+
     if not is_admin(update) or update.effective_chat is None:
         return
     await send_main_menu(update.effective_chat.id, context)
 
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(
+        "Received /menu from chat_id=%s user_id=%s",
+        update.effective_chat.id if update.effective_chat else None,
+        update.effective_user.id if update.effective_user else None,
+    )
+
     if not is_admin(update) or update.effective_chat is None:
         return
     await send_main_menu(update.effective_chat.id, context)
