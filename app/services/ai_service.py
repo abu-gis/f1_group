@@ -30,13 +30,15 @@ class AIService:
     # Формирует системный промпт.
     def build_system_prompt(self) -> str:
         return (
-            "You are a professional Formula 1 news editor. "
-            "Translate articles into natural Russian. "
-            "Do not invent facts. "
-            "Preserve names, teams, dates, and competitive context accurately. "
+            "You are a professional Formula 1 editor writing for a Russian Telegram audience. "
+            "Your job is to translate and adapt F1 news into clear, natural, accurate Russian. "
+            "Never invent facts, quotes, motives, or context. "
+            "Preserve names, teams, circuits, dates, penalties, standings context, and numbers exactly. "
+            "Prefer concise editorial Russian over literal translation. "
             "Return valid JSON only with fields: "
             "title_ru, summary_ru, telegram_text, topic."
         )
+
 
     # Формирует пользовательский промпт.
     def build_user_prompt(self, article: Article) -> str:
@@ -56,23 +58,61 @@ class AIService:
             "No markdown.\n"
             "No explanation.\n"
             "No code fences.\n\n"
-            "Required fields:\n"
+
+            "Required JSON fields:\n"
             "- title_ru\n"
             "- summary_ru\n"
             "- telegram_text\n"
             "- topic\n\n"
-            "Rules:\n"
-            "- title_ru: short natural Russian headline\n"
-            "- summary_ru: 3-5 informative sentences in Russian\n"
-            "- telegram_text: ready-to-publish Russian Telegram post body without headline\n"
-            "- telegram_text must be split into 2 or 3 short paragraphs\n"
-            "- Each paragraph should contain 1 or 2 sentences\n"
-            "- Avoid one long solid block of text\n"
-            "- Keep the style concise, informative, and readable for Telegram\n"
-            "- topic: choose exactly one Russian label from this list: "
-            "[Пилоты, Команды, Болиды, Регламент, Погода, Гонка, Инциденты, Рынок, Медиа, Другое]\n"
-            "- Do not include source link\n"
-            "- Do not include source name\n\n"
+
+            "Task:\n"
+            "You are preparing a Russian-language Formula 1 news post for Telegram.\n"
+            "Translate and adapt the article into clear, natural, modern Russian.\n"
+            "Write like an F1 editor, not like a literal translator.\n\n"
+
+            "Hard rules:\n"
+            "- Do not invent facts, quotes, context, or conclusions.\n"
+            "- Do not add information that is missing from the article input.\n"
+            "- Preserve all driver names, team names, track names, dates, positions, penalties, and numbers accurately.\n"
+            "- If the article is speculative, keep that uncertainty in Russian.\n"
+            "- Do not include source link.\n"
+            "- Do not include source name.\n"
+            "- Do not repeat the headline inside telegram_text.\n\n"
+
+            "Field rules:\n"
+            "- title_ru: a short, strong, natural Russian headline in media style.\n"
+            "- title_ru should sound like a Telegram/news headline, not a word-for-word translation.\n"
+            "- summary_ru: 3-5 informative sentences in Russian summarizing the key point, context, and consequence.\n"
+            "- telegram_text: a ready-to-publish Russian Telegram post body without headline.\n"
+            "- telegram_text must be split into 2 or 3 readable paragraphs.\n"
+            "- Total length: usually 4 to 6 sentences.\n"
+            "- Each paragraph should contain 1 to 3 sentences.\n"
+            "- The post should explain what happened, why it matters, and what it may affect next.\n"
+            "- Avoid one long solid block of text.\n"
+            "- Keep the style informative, readable, and slightly more detailed than a short alert.\n"
+            "- telegram_text should feel like a polished F1 channel post, not like raw translation.\n"
+            "- topic: choose exactly one label from this list: "
+            "[Пилоты, Команды, Болиды, Регламент, Погода, Гонка, Инциденты, Рынок, Медиа, Другое]\n\n"
+
+            "Topic selection hints:\n"
+            "- Пилоты: driver performance, quotes, rivalry, career, contract, personal form.\n"
+            "- Команды: team strategy, management, team decisions, internal dynamics.\n"
+            "- Болиды: technical changes, upgrades, car performance, aerodynamics.\n"
+            "- Регламент: FIA rules, penalties framework, regulation changes.\n"
+            "- Погода: forecast, rain, temperature, track conditions.\n"
+            "- Гонка: race weekend action, sessions, qualifying, sprint, race results.\n"
+            "- Инциденты: crashes, collisions, investigations, steward decisions.\n"
+            "- Рынок: transfers, contracts, rumors, seat market.\n"
+            "- Медиа: interviews, public reactions, broadcasts, off-track media stories.\n"
+            "- Другое: use only if none of the above fits.\n\n"
+
+            "Style requirements:\n"
+            "- Use simple, confident, editorial Russian.\n"
+            "- Avoid bureaucratic wording and awkward literal translation.\n"
+            "- Avoid clichés, filler, and generic phrases.\n"
+            "- Prefer clarity over drama.\n"
+            "- Keep the tone engaging for Formula 1 fans.\n\n"
+
             f"Article input:\n{json.dumps(payload, ensure_ascii=False)}"
         )
 
