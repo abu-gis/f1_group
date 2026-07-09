@@ -16,6 +16,26 @@ SOURCE_DOMAIN_MAP = {
     "f1oversteer.com": "F1 Oversteer",
 }
 
+KNOWN_SOURCES = [
+    "F1i",
+    "Racingnews365",
+    "The Race",
+    "PlanetF1",
+    "Motorsport",
+    "GPblog",
+    "Speedcafe",
+    "Sky Sports",
+    "FIA",
+    "BlackBook Motorsport",
+    "F1-Insider",
+    "ESPN",
+    "F1 Oversteer",
+]
+
+
+def get_known_sources() -> list[str]:
+    return KNOWN_SOURCES.copy()
+
 
 def normalize_source_name(source_name: str | None) -> str | None:
     if not source_name:
@@ -38,6 +58,7 @@ def normalize_source_name(source_name: str | None) -> str | None:
         "planetf1": "PlanetF1",
         "motorsport": "Motorsport",
         "gpblog": "GPblog",
+        "gp blog": "GPblog",
         "speedcafe": "Speedcafe",
         "sky sports": "Sky Sports",
         "fia": "FIA",
@@ -51,7 +72,7 @@ def normalize_source_name(source_name: str | None) -> str | None:
         if key == lowered:
             return label
 
-    return cleaned
+    return None
 
 
 def detect_source_name_from_url(url: str | None) -> str | None:
@@ -68,4 +89,4 @@ def detect_source_name_from_url(url: str | None) -> str | None:
         if hostname == domain or hostname.endswith(f".{domain}"):
             return label
 
-    return normalize_source_name(hostname or url)
+    return None

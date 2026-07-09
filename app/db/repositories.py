@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Article, SchedulePost, SourceSetting
 from app.schemas.article import NewsDetail
 from app.utils.signature import build_article_signature
-from app.utils.sources import normalize_source_name
+from app.utils.sources import get_known_sources, normalize_source_name
 
 
 class ArticleRepository:
@@ -364,28 +364,16 @@ class SourceSettingRepository:
         return await self.set_source_enabled(normalized_source_name, not current_enabled)
 
     async def list_sources_with_status(self) -> list[tuple[str, bool]]:
-        article_result = await self.session.execute(
-            select(Article.source_name)
-            .where(Article.source_name.is_not(None))
-            .distinct()
-            .order_by(Article.source_name.asc())
-        )
-        article_sources = [
-            normalize_source_name(row[0])
-            for row in article_result.all()
-            if row[0] and normalize_source_name(row[0])
-        ]
+        known_sources = get_known_sources()
 
         settings_result = await self.session.execute(
             select(SourceSetting).order_by(SourceSetting.source_name.asc())
         )
         settings = list(settings_result.scalars().all())
-
         settings_map = {item.source_name: item.is_enabled for item in settings}
-        all_sources = sorted(set(article_sources) | set(settings_map.keys()))
 
         result: list[tuple[str, bool]] = []
-        for source_name in all_sources:
+        for source_name in known_sources:
             result.append((source_name, settings_map.get(source_name, True)))
 
         return result
