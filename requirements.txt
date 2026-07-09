@@ -1,4 +1,4 @@
-httpx
+httpx[socks]
 selectolax
 pydantic
 pydantic-settings
@@ -8,4 +8,4 @@ alembic
 python-dotenv
 apscheduler
 openai
-python-telegram-bot
+python-telegram-bot[socks]
