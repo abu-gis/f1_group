@@ -26,25 +26,31 @@ async def start_admin_bot():
     await application.bot.delete_webhook(drop_pending_updates=True)
     await application.start()
 
-    if application.updater is None:
-        raise RuntimeError("Telegram updater is not available.")
-
     logger.info("Starting admin bot polling...")
-    await application.updater.start_polling(
-        drop_pending_updates=True,
-        allowed_updates=Update.ALL_TYPES,
-        poll_interval=2.0,
-        timeout=0,
-    )
 
     try:
-        await asyncio.Event().wait()
+        await poll_admin_updates(application)
     finally:
         logger.info("Stopping admin bot polling...")
-        if application.updater is not None:
-            await application.updater.stop()
         await application.stop()
         await application.shutdown()
+
+
+async def poll_admin_updates(application) -> None:
+    offset = None
+
+    while True:
+        updates = await application.bot.get_updates(
+            offset=offset,
+            timeout=30,
+            allowed_updates=Update.ALL_TYPES,
+        )
+
+        for update in updates:
+            offset = update.update_id + 1
+            await application.process_update(update)
+
+        await asyncio.sleep(1)
 
 
 async def main() -> None:
