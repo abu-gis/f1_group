@@ -26,7 +26,6 @@ from app.parsers.calendar import parse_calendar_rsc_payload
 from app.pipeline_runner import run_pipeline_once
 from app.schemas.calendar import CalendarRoundItem
 
-from telegram.ext import TypeHandler
 
 logger = setup_logger()
 MSK_TZ = timezone(timedelta(hours=3))
@@ -915,12 +914,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.exception("Telegram application error: %s", context.error)
 
 
-async def raw_update_logger(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        logger.info("Raw update received: %s", update.to_dict())
-    except Exception as error:
-        logger.exception("raw_update_logger failed: %s", error)
-
 
 def build_admin_application() -> Application:
     proxy_url = settings.telegram_proxy_url.strip() or None
@@ -940,7 +933,6 @@ def build_admin_application() -> Application:
         .build()
     )
 
-    application.add_handler(TypeHandler(Update, raw_update_logger), group=-1)
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("menu", menu_command))
     application.add_handler(CommandHandler("status", status_command))
