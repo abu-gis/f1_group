@@ -542,7 +542,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not is_admin(update) or update.effective_chat is None:
         return
     await send_main_menu(update.effective_chat.id, context)
-
+    logger.info("Replied to /start successfully.")
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(
@@ -554,7 +554,7 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not is_admin(update) or update.effective_chat is None:
         return
     await send_main_menu(update.effective_chat.id, context)
-
+    logger.info("Replied to /menu successfully.")
 
 async def schedule_edit_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
