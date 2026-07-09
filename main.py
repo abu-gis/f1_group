@@ -7,6 +7,7 @@ from app.config import settings
 from app.db.init_db import init_db
 from app.logger import setup_logger
 from app.pipeline_runner import run_pipeline_once
+from telegram import Update
 
 logger = setup_logger()
 
@@ -18,26 +19,30 @@ async def scheduled_pipeline_job() -> None:
         logger.exception("Scheduled pipeline job failed: %s", error)
 
 
-async def start_admin_bot() -> None:
+async def start_admin_bot():
     application = build_admin_application()
 
     await application.initialize()
+    await application.bot.delete_webhook(drop_pending_updates=True)
     await application.start()
 
     if application.updater is None:
         raise RuntimeError("Telegram updater is not available.")
 
     logger.info("Starting admin bot polling...")
-    await application.updater.start_polling()
+    await application.updater.start_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+        poll_interval=1.0,
+        timeout=30,
+    )
 
     try:
         await asyncio.Event().wait()
     finally:
         logger.info("Stopping admin bot polling...")
-
         if application.updater is not None:
             await application.updater.stop()
-
         await application.stop()
         await application.shutdown()
 
