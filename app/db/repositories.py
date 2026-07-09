@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Article, SchedulePost, SourceSetting
 from app.schemas.article import NewsDetail
 from app.utils.signature import build_article_signature
+from app.utils.sources import normalize_source_name
 
 
 class ArticleRepository:
@@ -40,7 +41,7 @@ class ArticleRepository:
             summary=detail.summary,
             body_text=detail.body_text,
             original_url=detail.original_url,
-            source_name=detail.source_name,
+            source_name=normalize_source_name(detail.source_name),
             source_logo_url=detail.source_logo_url,
             main_image_url=detail.main_image_url,
             published_at_text=detail.published_at_text,
@@ -314,27 +315,36 @@ class SourceSettingRepository:
         self.session = session
 
     async def get_by_source_name(self, source_name: str) -> SourceSetting | None:
+        normalized_source_name = normalize_source_name(source_name)
+        if not normalized_source_name:
+            return None
+
         result = await self.session.execute(
-            select(SourceSetting).where(SourceSetting.source_name == source_name)
+            select(SourceSetting).where(SourceSetting.source_name == normalized_source_name)
         )
         return result.scalar_one_or_none()
 
     async def is_source_enabled(self, source_name: str | None) -> bool:
-        if not source_name:
+        normalized_source_name = normalize_source_name(source_name)
+        if not normalized_source_name:
             return True
 
-        setting = await self.get_by_source_name(source_name)
+        setting = await self.get_by_source_name(normalized_source_name)
         if setting is None:
             return True
 
         return setting.is_enabled
 
     async def set_source_enabled(self, source_name: str, is_enabled: bool) -> SourceSetting:
-        setting = await self.get_by_source_name(source_name)
+        normalized_source_name = normalize_source_name(source_name)
+        if not normalized_source_name:
+            raise ValueError("Source name is empty after normalization")
+
+        setting = await self.get_by_source_name(normalized_source_name)
 
         if setting is None:
             setting = SourceSetting(
-                source_name=source_name,
+                source_name=normalized_source_name,
                 is_enabled=is_enabled,
             )
             self.session.add(setting)
@@ -346,8 +356,12 @@ class SourceSettingRepository:
         return setting
 
     async def toggle_source(self, source_name: str) -> SourceSetting:
-        current_enabled = await self.is_source_enabled(source_name)
-        return await self.set_source_enabled(source_name, not current_enabled)
+        normalized_source_name = normalize_source_name(source_name)
+        if not normalized_source_name:
+            raise ValueError("Source name is empty after normalization")
+
+        current_enabled = await self.is_source_enabled(normalized_source_name)
+        return await self.set_source_enabled(normalized_source_name, not current_enabled)
 
     async def list_sources_with_status(self) -> list[tuple[str, bool]]:
         article_result = await self.session.execute(
@@ -357,9 +371,9 @@ class SourceSettingRepository:
             .order_by(Article.source_name.asc())
         )
         article_sources = [
-            row[0].strip()
+            normalize_source_name(row[0])
             for row in article_result.all()
-            if row[0] and row[0].strip()
+            if row[0] and normalize_source_name(row[0])
         ]
 
         settings_result = await self.session.execute(

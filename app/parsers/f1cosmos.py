@@ -5,6 +5,7 @@ from selectolax.parser import HTMLParser
 
 from app.config import settings
 from app.schemas.article import NewsDetail, NewsListItem
+from app.utils.sources import detect_source_name_from_url, normalize_source_name
 
 
 KNOWN_CATEGORIES = {
@@ -42,14 +43,11 @@ def extract_source_name_from_node(node) -> str | None:
         if normalized_lower in KNOWN_CATEGORIES:
             continue
 
-        return normalized
+        return normalize_source_name(normalized)
 
     return None
 
 
-# Парсер списка новостей.
-# На вход получает HTML страницы /dashboard/news
-# На выходе возвращает список карточек новостей в виде NewsListItem.
 def parse_news_list(html: str) -> list[NewsListItem]:
     tree = HTMLParser(html)
     items: list[NewsListItem] = []
@@ -108,7 +106,7 @@ def parse_news_list(html: str) -> list[NewsListItem]:
                 category = normalized
                 continue
 
-            source_name = normalized
+            source_name = normalize_source_name(normalized)
 
         items.append(
             NewsListItem(
@@ -126,9 +124,6 @@ def parse_news_list(html: str) -> list[NewsListItem]:
     return items
 
 
-# Парсер полной страницы новости.
-# На вход получает HTML detail page и базовые данные из list item.
-# На выходе возвращает полную структуру статьи.
 def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
     tree = HTMLParser(html)
 
@@ -138,7 +133,7 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
     summary = None
     body_text = None
     original_url = None
-    source_name = list_item.source_name
+    source_name = normalize_source_name(list_item.source_name)
     source_logo_url = None
     main_image_url = list_item.preview_image_url
     published_at = None
@@ -182,6 +177,10 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
                     original_url = original_link.attributes.get("href")
                 break
 
+    detected_source_name = detect_source_name_from_url(original_url)
+    if detected_source_name:
+        source_name = detected_source_name
+
     time_nodes = tree.css("time")
     for time_node in time_nodes:
         datetime_value = time_node.attributes.get("datetime")
@@ -199,7 +198,6 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
         if published_at_text or published_at:
             break
 
-    # Берем источник только из блока рядом с logo.
     for image_node in tree.css("img"):
         image_alt = (image_node.attributes.get("alt") or "").strip().lower()
         if image_alt != "logo":
@@ -210,18 +208,17 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
         parent_node = image_node.parent
         if parent_node is not None:
             extracted_source = extract_source_name_from_node(parent_node)
-            if extracted_source:
+            if extracted_source and not detected_source_name:
                 source_name = extracted_source
                 break
 
         grandparent_node = parent_node.parent if parent_node is not None else None
         if grandparent_node is not None:
             extracted_source = extract_source_name_from_node(grandparent_node)
-            if extracted_source:
+            if extracted_source and not detected_source_name:
                 source_name = extracted_source
                 break
 
-    # Категорию можно уточнять по span всей страницы, но не источник.
     for span_node in tree.css("span"):
         text = span_node.text(strip=True)
         if not text:
@@ -249,9 +246,6 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
     )
 
 
-# Убирает дубли новостей внутри одного списка.
-# Сайт иногда отдает повторяющиеся карточки, поэтому
-# перед обработкой полезно оставить только уникальные slug.
 def deduplicate_news_list(items: list[NewsListItem]) -> list[NewsListItem]:
     unique_items: list[NewsListItem] = []
     seen_slugs: set[str] = set()
