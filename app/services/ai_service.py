@@ -4,6 +4,7 @@ import openai
 
 from app.config import settings
 from app.db.models import Article
+from app.utils.f1_names import build_f1_name_prompt_block, normalize_f1_names
 
 
 # Сервис AI-обработки статьи через OpenAI-совместимый API.
@@ -15,6 +16,7 @@ class AIService:
             base_url=settings.openai_base_url,
         )
         self.model = settings.openai_model
+        self.name_prompt_block = build_f1_name_prompt_block()
 
     # Готовит входные данные статьи для модели.
     def build_article_input(self, article: Article) -> dict[str, str]:
@@ -39,7 +41,6 @@ class AIService:
             "title_ru, summary_ru, telegram_text, topic."
         )
 
-
     # Формирует пользовательский промпт.
     def build_user_prompt(self, article: Article) -> str:
         article_input = self.build_article_input(article)
@@ -58,18 +59,15 @@ class AIService:
             "No markdown.\n"
             "No explanation.\n"
             "No code fences.\n\n"
-
             "Required JSON fields:\n"
             "- title_ru\n"
             "- summary_ru\n"
             "- telegram_text\n"
             "- topic\n\n"
-
             "Task:\n"
             "You are preparing a Russian-language Formula 1 news post for Telegram.\n"
             "Translate and adapt the article into clear, natural, modern Russian.\n"
             "Write like an F1 editor, not like a literal translator.\n\n"
-
             "Hard rules:\n"
             "- Do not invent facts, quotes, context, or conclusions.\n"
             "- Do not add information that is missing from the article input.\n"
@@ -78,7 +76,6 @@ class AIService:
             "- Do not include source link.\n"
             "- Do not include source name.\n"
             "- Do not repeat the headline inside telegram_text.\n\n"
-
             "Field rules:\n"
             "- title_ru: a short, strong, natural Russian headline in media style.\n"
             "- title_ru should sound like a Telegram/news headline, not a word-for-word translation.\n"
@@ -93,7 +90,6 @@ class AIService:
             "- telegram_text should feel like a polished F1 channel post, not like raw translation.\n"
             "- topic: choose exactly one label from this list: "
             "[Пилоты, Команды, Болиды, Регламент, Погода, Гонка, Инциденты, Рынок, Медиа, Другое]\n\n"
-
             "Topic selection hints:\n"
             "- Пилоты: driver performance, quotes, rivalry, career, contract, personal form.\n"
             "- Команды: team strategy, management, team decisions, internal dynamics.\n"
@@ -105,16 +101,25 @@ class AIService:
             "- Рынок: transfers, contracts, rumors, seat market.\n"
             "- Медиа: interviews, public reactions, broadcasts, off-track media stories.\n"
             "- Другое: use only if none of the above fits.\n\n"
-
             "Style requirements:\n"
             "- Use simple, confident, editorial Russian.\n"
             "- Avoid bureaucratic wording and awkward literal translation.\n"
-            "- Avoid clichés, filler, and generic phrases.\n"
+            "- Avoid cliches, filler, and generic phrases.\n"
             "- Prefer clarity over drama.\n"
             "- Keep the tone engaging for Formula 1 fans.\n\n"
-
+            "Mandatory name spellings:\n"
+            f"{self.name_prompt_block}\n\n"
             f"Article input:\n{json.dumps(payload, ensure_ascii=False)}"
         )
+
+    # Нормализует имена после ответа модели, чтобы написание было единым.
+    def normalize_ai_result(self, parsed: dict[str, str]) -> dict[str, str]:
+        return {
+            "title_ru": normalize_f1_names(parsed.get("title_ru", "").strip()),
+            "summary_ru": normalize_f1_names(parsed.get("summary_ru", "").strip()),
+            "telegram_text": normalize_f1_names(parsed.get("telegram_text", "").strip()),
+            "topic": parsed.get("topic", "").strip(),
+        }
 
     # Если модель вернула JSON внутри ```json ... ```,
     # вырезаем только содержимое блока.
@@ -148,11 +153,12 @@ class AIService:
 
         json_text = self.extract_json_text(content)
         parsed = json.loads(json_text)
+        normalized_result = self.normalize_ai_result(parsed)
 
-        title_ru = parsed.get("title_ru", "").strip()
-        summary_ru = parsed.get("summary_ru", "").strip()
-        telegram_text = parsed.get("telegram_text", "").strip()
-        topic = parsed.get("topic", "").strip()
+        title_ru = normalized_result["title_ru"]
+        summary_ru = normalized_result["summary_ru"]
+        telegram_text = normalized_result["telegram_text"]
+        topic = normalized_result["topic"]
 
         if not title_ru or not summary_ru or not telegram_text:
             raise ValueError("Model returned incomplete JSON fields")
