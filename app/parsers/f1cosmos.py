@@ -10,8 +10,10 @@ from app.schemas.article import NewsDetail, NewsListItem
 KNOWN_CATEGORIES = {
     "analysis",
     "breaking",
+    "breaking news",
     "opinion",
     "report",
+    "practice report",
     "rumor",
     "news",
     "reactions",
@@ -20,6 +22,29 @@ KNOWN_CATEGORIES = {
     "feature",
     "technical",
 }
+
+
+def extract_source_name_from_node(node) -> str | None:
+    if node is None:
+        return None
+
+    for span_node in node.css("span"):
+        text = span_node.text(strip=True)
+        if not text:
+            continue
+
+        normalized = text.strip()
+        normalized_lower = normalized.lower()
+
+        if normalized_lower == "logo":
+            continue
+
+        if normalized_lower in KNOWN_CATEGORIES:
+            continue
+
+        return normalized
+
+    return None
 
 
 # Парсер списка новостей.
@@ -125,14 +150,12 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
         if title_node:
             title = title_node.text(strip=True)
 
-        # Главная картинка статьи.
         image_node = article_node.css_first("img")
         if image_node:
             image_src = image_node.attributes.get("src")
             if image_src:
                 main_image_url = image_src
 
-        # Ищем Summary по заголовку блока.
         span_nodes = article_node.css("span")
         for span_node in span_nodes:
             if span_node.text(strip=True).lower() == "summary":
@@ -147,12 +170,10 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
                                 summary = summary_text
                 break
 
-        # Основной текст статьи обычно лежит в prose-блоке.
         prose_node = article_node.css_first(".prose")
         if prose_node:
             body_text = prose_node.text(strip=True)
 
-        # Ищем ссылку на оригинальную статью по подписи Original Article.
         for paragraph_node in article_node.css("p"):
             paragraph_text = paragraph_node.text(strip=True).lower()
             if "original article" in paragraph_text:
@@ -161,8 +182,6 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
                     original_url = original_link.attributes.get("href")
                 break
 
-    # Ищем время публикации по всей странице, а не только внутри article.
-    # На странице detail time часто находится в нижней панели вне article.
     time_nodes = tree.css("time")
     for time_node in time_nodes:
         datetime_value = time_node.attributes.get("datetime")
@@ -177,40 +196,42 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
             except ValueError:
                 published_at = None
 
-        # Берем первый осмысленный time и выходим.
         if published_at_text or published_at:
             break
 
-    # Ищем логотип источника по всей странице.
+    # Берем источник только из блока рядом с logo.
     for image_node in tree.css("img"):
         image_alt = (image_node.attributes.get("alt") or "").strip().lower()
-        if image_alt == "logo":
-            source_logo_url = image_node.attributes.get("src")
-            break
+        if image_alt != "logo":
+            continue
 
-    # Пытаемся уточнить источник и категорию по span-элементам страницы.
-    # Здесь стараемся не перепутать источник с типом материала.
-    page_span_texts: list[str] = []
+        source_logo_url = image_node.attributes.get("src")
+
+        parent_node = image_node.parent
+        if parent_node is not None:
+            extracted_source = extract_source_name_from_node(parent_node)
+            if extracted_source:
+                source_name = extracted_source
+                break
+
+        grandparent_node = parent_node.parent if parent_node is not None else None
+        if grandparent_node is not None:
+            extracted_source = extract_source_name_from_node(grandparent_node)
+            if extracted_source:
+                source_name = extracted_source
+                break
+
+    # Категорию можно уточнять по span всей страницы, но не источник.
     for span_node in tree.css("span"):
         text = span_node.text(strip=True)
-        if text:
-            page_span_texts.append(text)
+        if not text:
+            continue
 
-    for text in page_span_texts:
         normalized = text.strip()
         normalized_lower = normalized.lower()
 
-        if normalized_lower == "logo":
-            continue
-
         if normalized_lower in KNOWN_CATEGORIES:
             category = normalized
-            continue
-
-        # Не затираем уже найденный источник словами вроде "Practice report".
-        if normalized_lower not in KNOWN_CATEGORIES and normalized != title:
-            if source_name is None:
-                source_name = normalized
 
     return NewsDetail(
         title=title,
@@ -226,6 +247,7 @@ def parse_news_detail(html: str, list_item: NewsListItem) -> NewsDetail:
         published_at_text=published_at_text,
         category=category,
     )
+
 
 # Убирает дубли новостей внутри одного списка.
 # Сайт иногда отдает повторяющиеся карточки, поэтому
