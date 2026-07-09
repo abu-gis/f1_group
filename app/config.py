@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     telegram_admin_chat_id: str = ""
     telegram_admin_user_id: str = ""
+    telegram_proxy_url: str = ""
 
     source_base_url: str
     source_news_path: str

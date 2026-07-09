@@ -2,6 +2,7 @@ import asyncio
 import html
 
 from telegram import Bot
+from telegram.request import HTTPXRequest
 
 from app.config import settings
 from app.db.models import Article
@@ -12,7 +13,20 @@ from app.db.models import Article
 # Иначе отправляем обычное текстовое сообщение.
 class TelegramService:
     def __init__(self) -> None:
-        self.bot = Bot(token=settings.telegram_bot_token)
+        proxy_url = settings.telegram_proxy_url.strip() or None
+
+        request = HTTPXRequest(
+            proxy=proxy_url,
+            connect_timeout=30,
+            read_timeout=60,
+            write_timeout=60,
+            pool_timeout=30,
+        )
+
+        self.bot = Bot(
+            token=settings.telegram_bot_token,
+            request=request,
+        )
         self.chat_id = settings.telegram_chat_id
 
     # Подбираем эмодзи по теме статьи.

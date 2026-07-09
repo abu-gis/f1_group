@@ -2,7 +2,7 @@ import html
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
+from telegram.request import HTTPXRequest
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -902,7 +902,22 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def build_admin_application() -> Application:
-    application = Application.builder().token(settings.telegram_bot_token).build()
+    proxy_url = settings.telegram_proxy_url.strip() or None
+
+    request = HTTPXRequest(
+        proxy=proxy_url,
+        connect_timeout=30,
+        read_timeout=60,
+        write_timeout=60,
+        pool_timeout=30,
+    )
+
+    application = (
+        Application.builder()
+        .token(settings.telegram_bot_token)
+        .request(request)
+        .build()
+    )
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("menu", menu_command))
