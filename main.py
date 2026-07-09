@@ -33,8 +33,8 @@ async def start_admin_bot():
     await application.updater.start_polling(
         drop_pending_updates=True,
         allowed_updates=Update.ALL_TYPES,
-        poll_interval=1.0,
-        timeout=30,
+        poll_interval=2.0,
+        timeout=0,
     )
 
     try:
