@@ -66,7 +66,7 @@ async def poll_admin_updates(application) -> None:
                 offset = update.update_id + 1
                 await application.process_update(update)
 
-            await asyncio.sleep(1))
+            await asyncio.sleep(1)
 
 
 async def main() -> None:
