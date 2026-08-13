@@ -44,29 +44,34 @@ async def poll_admin_updates(application) -> None:
 
     async with httpx.AsyncClient(proxy=proxy, timeout=60) as client:
         while True:
-            params = {
-                "timeout": 30,
-                "allowed_updates": '["message","callback_query","my_chat_member"]',
-            }
+            try:
+                params = {
+                    "timeout": 30,
+                    "allowed_updates": '["message","callback_query","my_chat_member"]',
+                }
 
-            if offset is not None:
-                params["offset"] = offset
+                if offset is not None:
+                    params["offset"] = offset
 
-            response = await client.get(
-                f"https://api.telegram.org/bot{token}/getUpdates",
-                params=params,
-            )
-            response.raise_for_status()
+                response = await client.get(
+                    f"https://api.telegram.org/bot{token}/getUpdates",
+                    params=params,
+                )
+                response.raise_for_status()
 
-            payload = response.json()
-            updates = payload.get("result", [])
+                payload = response.json()
+                updates = payload.get("result", [])
 
-            for raw_update in updates:
-                update = Update.de_json(raw_update, application.bot)
-                offset = update.update_id + 1
-                await application.process_update(update)
+                for raw_update in updates:
+                    update = Update.de_json(raw_update, application.bot)
+                    offset = update.update_id + 1
+                    await application.process_update(update)
 
-            await asyncio.sleep(1)
+                await asyncio.sleep(1)
+
+            except Exception as error:
+                logger.exception("Admin bot polling error: %s", error)
+                await asyncio.sleep(10)
 
 
 async def main() -> None:
